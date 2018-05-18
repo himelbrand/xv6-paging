@@ -147,9 +147,7 @@ exec(char *path, char **argv)
   int totalPageFaultCount = proc->totalPageFaultCount;
   int totalPagedOutCount = proc->totalPagedOutCount;
   // backup and reset proc fields
-#ifndef NONE
-  //TODO delete   cprintf("EXEC: NONE undefined (proc = %s)- backing up page info \n", proc->name);
- 
+#ifndef NONE 
   struct freepg freepages[MAX_PSYC_PAGES];
   struct pgdesc swappedpages[MAX_PSYC_PAGES];
   for (i = 0; i < MAX_PSYC_PAGES; i++) {

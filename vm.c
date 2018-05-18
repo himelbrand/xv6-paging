@@ -9,7 +9,7 @@
 
 #define BUF_SIZE PGSIZE/4
 #define MAX_POSSIBLE ~0x80000000
-//using 0x80000000 introduces "negative" numbers which r a pain in the ass!
+
 #define ADD_TO_AGE 0x40000000
 
 extern char data[]; // defined by kernel.ld
@@ -496,6 +496,9 @@ foundswappedpageslot:
 
 }
 
+//@Added swap pages according to the policy
+//
+
 void swapPages(uint addr)
 {
   struct proc * proc =myproc();
@@ -504,25 +507,22 @@ void swapPages(uint addr)
     proc->pagesinmem++;
     return;
   }
-  //TODO delete $$$
 
-#if FIFO
-  fifoSwap(addr);
-#else
+  #if FIFO
+    fifoSwap(addr);
+  #else
 
-#if SCFIFO
-  cprintf("swapPages: calling scSwap\n");
- // scSwap(addr);
-#else
+  #if SCFIFO
+    scSwap(addr);
+  #else
 
-#if NFU
-//nfuSwap(addr);
-#endif
-#endif
-#endif
+  #if NFUA
+    nfuSwap(addr);
+  #endif
+  #endif
+  #endif
   lcr3(V2P(proc->pgdir));
   ++proc->totalPagedOutCount;
-  // cprintf("swapPages:proc->totalPagedOutCount:%d\n", ++proc->totalPagedOutCount);//TODO delete
 }
 
 //PAGEBREAK!
@@ -531,3 +531,182 @@ void swapPages(uint addr)
 // Blank page.
 //PAGEBREAK!
 // Blank page.
+
+
+void nfuRecord(char *va){
+  struct proc * proc =myproc();
+  int i;
+  for (i = 0; i < MAX_PSYC_PAGES; i++)
+    if (proc->freepages[i].va == (char*)0xffffffff)
+      goto foundrnp;
+  cprintf("panic follows, pid:%d, name:%s\n", proc->pid, proc->name);
+  panic("recordNewPage: no free pages");
+foundrnp:
+  proc->freepages[i].va = va;
+}
+
+void recordNewPage(char *va) {
+
+  #if FIFO
+    fifoRecord(va);
+  #else
+
+  #if SCFIFO
+    scRecord(va);
+  #else
+
+  #if NFUA
+    nfuRecord(va);
+  #endif
+  #endif
+  #endif
+
+  proc->pagesinmem++;
+}
+
+
+struct freepg *nfuWrite(char *va) {
+  int i, j;
+  uint maxIndx = -1, maxAge = 0; //MAX_POSSIBLE;
+  struct freepg *chosen;
+  struct proc * proc =myproc();
+
+  for (i = 0; i < MAX_PSYC_PAGES; i++){
+    // checking for available slot 
+    if (proc->swappedpages[i].va == (char*)0xffffffff)
+      goto foundswappedpageslot;
+  }
+  panic("writePageToSwapFile: FIFO no slot for swapped page");
+
+foundswappedpageslot:
+  for (j = 0; j < MAX_PSYC_PAGES; j++)
+    if (proc->freepages[j].va != (char*)0xffffffff){
+      if (proc->freepages[j].age > maxAge){
+        maxAge = proc->freepages[j].age;
+        maxIndx = j;
+      }
+    }
+
+  if(maxIndx == -1)
+    panic("nfuWrite: no free page to swap");
+  chosen = &proc->freepages[maxIndx];
+
+  pte_t *pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
+  if (!*pte1)
+    panic("writePageToSwapFile: pte1 is empty");
+
+//  b4 accessing by writing to file,
+//  update accessed bit and age in case it misses a clock tick?
+//  be extra careful not to double add by locking
+  acquire(&tickslock);
+  if((*pte1) & PTE_A){
+    ++chosen->age;
+    *pte1 &= ~PTE_A;    
+  }
+  release(&tickslock);
+
+  //make swap
+  proc->swappedpages[i].va = chosen->va;
+  int num = 0;
+  if ((num = writeToSwapFile(proc, (char*)PTE_ADDR(chosen->va), i * PGSIZE, PGSIZE)) == 0)
+    return 0;
+
+  kfree((char*)PTE_ADDR(P2V_WO(*walkpgdir(proc->pgdir, chosen->va, 0))));
+  *pte1 = PTE_W | PTE_U | PTE_PG;
+  ++proc->totalPagedOutCount;
+  ++proc->pagesinswapfile;
+
+  lcr3(v2p(proc->pgdir));
+  chosen->va = va;
+
+  return chosen;
+}
+
+// NFU page swaping policy
+// TODO, split cases to NFUA and LAPA
+void nfuSwap(uint addr) {
+  int i, j;
+  uint maxIndx = -1, maxAge = 0;// MAX_POSSIBLE;
+  char buf[BUF_SIZE];
+  pte_t *pte1, *pte2;
+  struct freepg *chosen;
+
+
+  for (j = 0; j < MAX_PSYC_PAGES; j++)
+    if (proc->freepages[j].va != (char*)0xffffffff){
+      if (proc->freepages[j].age > maxAge){
+        maxAge = proc->freepages[j].age;
+        maxIndx = j;
+      }
+    }
+
+  if(maxIndx == -1)
+    panic("nfuSwap: no free page to swap???");
+  chosen = &proc->freepages[maxIndx];
+
+  if(DEBUG){
+    //cprintf("\naddress between 0x%x and 0x%x was accessed but was on disk.\n", addr, addr+PGSIZE);
+    cprintf("NFU chose to page out page starting at 0x%x \n\n", chosen->va);
+  }
+
+  //find the address of the page table entry to copy into the swap file
+  pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
+  if (!*pte1)
+    panic("nfuSwap: pte1 is empty");
+
+//  TODO verify: b4 accessing by writing to file,
+//  update accessed bit and age in case it misses a clock tick?
+//  be extra careful not to double add by locking
+  acquire(&tickslock);
+  //TODO delete cprintf("acquire(&tickslock)\n");
+  if((*pte1) & PTE_A){
+    ++chosen->age;
+    *pte1 &= ~PTE_A;
+    //TODO delete cprintf("========\n\nWOW! Matan was right!\n(never saw this actually printed)=======\n\n");
+  }
+  release(&tickslock);
+
+  //find a swap file page descriptor slot
+  for (i = 0; i < MAX_PSYC_PAGES; i++){
+    if (proc->swappedpages[i].va == (char*)PTE_ADDR(addr))
+      goto foundswappedpageslot;
+  }
+  panic("nfuSwap: no slot for swapped page");
+
+foundswappedpageslot:
+
+  proc->swappedpages[i].va = chosen->va;
+  //assign the physical page to addr in the relevant page table
+  pte2 = walkpgdir(proc->pgdir, (void*)addr, 0);
+  if (!*pte2)
+    panic("nfuSwap: pte2 is empty");
+  //set page table entry
+  //TODO verify we're not setting PTE_U where we shouldn't be...
+  *pte2 = PTE_ADDR(*pte1) | PTE_U | PTE_W | PTE_P;// access bit is zeroed...
+
+  for (j = 0; j < 4; j++) {
+    int loc = (i * PGSIZE) + ((PGSIZE / 4) * j);
+    // cprintf("i:%d j:%d loc:0x%x\n", i,j,loc);//TODO delete
+    int addroffset = ((PGSIZE / 4) * j);
+    // int read, written;
+    memset(buf, 0, BUF_SIZE);
+    //copy the new page from the swap file to buf
+    // read =
+    readFromSwapFile(proc, buf, loc, BUF_SIZE);
+    // cprintf("read:%d\n", read);//TODO delete
+    //copy the old page from the memory to the swap file
+    //written =
+    writeToSwapFile(proc, (char*)(P2V_WO(PTE_ADDR(*pte1)) + addroffset), loc, BUF_SIZE);
+    // cprintf("written:%d\n", written);//TODO delete
+    //copy the new page from buf to the memory
+    memmove((void*)(PTE_ADDR(addr) + addroffset), (void*)buf, BUF_SIZE);
+  }
+  //update the page table entry flags, reset the physical page address
+  *pte1 = PTE_U | PTE_W | PTE_PG;
+  //update l to hold the new va
+  //l->next = proc->head;
+  //proc->head = l;
+  chosen->va = (char*)PTE_ADDR(addr);
+  // was this missed some how???
+  chosen->age = 0;
+}

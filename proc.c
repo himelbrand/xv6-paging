@@ -7,6 +7,9 @@
 #include "proc.h"
 #include "spinlock.h"
 
+#define AGE_INC 0x80000000            // adding 1 to the counter msb
+#define SHIFT_COUNTER(x) (x >> 1);    // for shifting the counter
+
 struct
 {
   struct spinlock lock;
@@ -598,3 +601,46 @@ void procdump(void)
     cprintf("\n");
   }
 }
+
+// Purpose: Iterate over all the procceses pages
+// and update the age counter
+void updateNFU(void){
+  struct proc *p;
+  int i;
+  pte_t *pte, *pde, *pgtab;
+
+  acquire(&ptable.lock);
+  
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if((p->state == SLEEPING || p->state == RUNNABLE || p->state == RUNNING) && (p->pid > 2)){
+      for (i = 0; i < MAX_PSYC_PAGES; i++){
+        
+        if (p->freepages[i].va == (char*)0xffffffff)
+          continue;
+        // adding 1 to the counters
+        ++p->freepages[i].age;
+        ++p->swappedpages[i].age;
+        
+        pde = &p->pgdir[PDX(p->freepages[i].va)];
+
+        // checking if the fist page table is present
+        if(*pde & PTE_P){
+          pgtab = (pte_t*)p2v(PTE_ADDR(*pde));
+          pte = &pgtab[PTX(p->freepages[i].va)];
+        }
+
+        else 
+          pte = 0;
+
+        if(pte){
+          // checking if the current page was access than add 1 to counter
+          if( *pte & PTE_A){
+            p->freepages[i].age = 0;
+          }
+        }
+      }
+    }
+  }
+  release(&ptable.lock);
+}
+

@@ -52,10 +52,10 @@ struct inode*   nameiparent(char*, char*);
 int             readi(struct inode*, char*, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, char*, uint, uint);
-int		createSwapFile(struct proc* p);
-int		readFromSwapFile(struct proc * p, char* buffer, uint placeOnFile, uint size);
-int		writeToSwapFile(struct proc* p, char* buffer, uint placeOnFile, uint size);
-int		removeSwapFile(struct proc* p);
+int				createSwapFile(struct proc* p);
+int				readFromSwapFile(struct proc * p, char* buffer, uint placeOnFile, uint size);
+int				writeToSwapFile(struct proc* p, char* buffer, uint placeOnFile, uint size);
+int				removeSwapFile(struct proc* p);
 
 // ide.c
 void            ideinit(void);
@@ -124,6 +124,7 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
+void 			updateNFU(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
