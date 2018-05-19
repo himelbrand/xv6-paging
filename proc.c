@@ -210,6 +210,8 @@ int fork(void)
   }
 
   // Copy process state from proc.
+        cprintf("curproc->sz = %d\n",curproc->sz);
+
   if ((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0)
   {
     kfree(np->kstack);
@@ -270,6 +272,21 @@ int fork(void)
       if (np->freepages[j].va == curproc->freepages[i].prev->va)
         np->freepages[i].prev = &np->freepages[j];
     }
+#if SCFIFO
+  for (i = 0; i < MAX_PSYC_PAGES; i++)
+  {
+    if (curproc->pghead->va == np->freepages[i].va)
+    {
+      //TODO delete       cprintf("\nfork: head copied!\n\n");
+      np->pghead = &np->freepages[i];
+    }
+    if (curproc->pgtail->va == np->freepages[i].va)
+    {
+      np->pgtail = &np->freepages[i];
+      //cprintf("\nfork: head copied!\n\n");
+    }
+  }
+#endif
 
   acquire(&ptable.lock);
 
@@ -377,7 +394,32 @@ int wait(void)
     sleep(curproc, &ptable.lock); //DOC: wait-sleep
   }
 }
-
+void aqUpdate(void){
+  struct freepg *mover,*prev;
+  struct proc *proc = myproc();
+  mover=proc->pghead;
+  while(mover && mover->next){
+    if(checkAccBit(mover->va) && mover != proc->pghead){
+      prev = mover->prev;
+      mover->prev = prev->prev;
+      prev->prev = mover;
+      prev->next = mover->next;
+      mover->next = prev;
+      mover = prev->next;
+    }
+  }
+}
+void updateFPages(void){
+  #ifdef AQ
+    aqUpdate();
+  #else
+  #ifdef LAPA
+  #else
+  #ifdef NFUA
+  #endif
+  #endif
+  #endif
+}
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -412,8 +454,11 @@ void scheduler(void)
       p->state = RUNNING;
 
       swtch(&(c->scheduler), p->context);
-      switchkvm();
 
+      #if defined(AQ) || defined(LAPA) || defined(NFUA)
+        updateFPages();
+      #endif
+      switchkvm();
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;

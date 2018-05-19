@@ -89,7 +89,7 @@ void trap(struct trapframe *tf)
       if (((uint *)PTE_ADDR(P2V(*vaddr)))[PTX(addr)] & PTE_PG)
       { // if the page is in the process's swap file
         // cprintf("page is in swap file, pid %d, va %p\n", proc->pid, addr); //TODO delete
-        swapPages(PTE_ADDR(addr));//handle swap pages by SELECTION
+        handlePageFault(PTE_ADDR(addr));//handle swap pages by SELECTION
         ++myproc()->totalPageFaultCount;
         // cprintf("proc->totalPageFaultCount:%d\n", ++proc->totalPageFaultCount);//TODO delete
         return;
