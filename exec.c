@@ -142,14 +142,14 @@ exec(char *path, char **argv)
  
   
   struct proc *proc = myproc();
-  int pagesinmem = proc->pagesinmem;
-  int pagesinswapfile = proc->pagesinswapfile;
-  int totalPageFaultCount = proc->totalPageFaultCount;
-  int totalPagedOutCount = proc->totalPagedOutCount;
+  
   // backup and reset proc fields
 #ifndef NONE
   //TODO delete   cprintf("EXEC: NONE undefined (proc = %s)- backing up page info \n", proc->name);
- 
+ int pagesinmem = proc->pagesinmem;
+  int pagesinswapfile = proc->pagesinswapfile;
+  int totalPageFaultCount = proc->totalPageFaultCount;
+  int totalPagedOutCount = proc->totalPagedOutCount;
   struct freepg freepages[MAX_PSYC_PAGES];
   struct pgdesc swappedpages[MAX_PSYC_PAGES];
   for (i = 0; i < MAX_PSYC_PAGES; i++) {
@@ -175,9 +175,10 @@ exec(char *path, char **argv)
   proc->totalPagedOutCount = 0;
   proc->pghead = 0;
   proc->pgtail = 0;
-#endif
-struct freepg *pghead = proc->pghead;
+  struct freepg *pghead = proc->pghead;
   struct freepg *pgtail = proc->pgtail;
+#endif
+
    // Check ELF header
   if(readi(ip, (char*)&elf, 0, sizeof(elf)) < sizeof(elf))
     goto bad;
@@ -203,7 +204,6 @@ struct freepg *pghead = proc->pghead;
   iunlockput(ip);
   end_op();
   ip = 0;
-
   // Allocate two pages at the next page boundary.
   // Make the first inaccessible.  Use the second as the user stack.
   sz = PGROUNDUP(sz);
@@ -211,6 +211,7 @@ struct freepg *pghead = proc->pghead;
     goto bad;
   clearpteu(pgdir, (char*)(sz - 2*PGSIZE));
   sp = sz;
+//cprintf("no. of pages allocated on exec:%d, pid:%d, name:%s\n", proc->pagesinmem, proc->pid, proc->name);
 
   // Push argument strings, prepare rest of stack in ustack.
   for(argc = 0; argv[argc]; argc++) {
@@ -250,7 +251,7 @@ struct freepg *pghead = proc->pghead;
   switchuvm(proc);
   // TODO delete cprintf("freevm(oldpgdir)\n");
   freevm(oldpgdir);
-  cprintf("no. of pages allocated on exec:%d, pid:%d, name:%s\n", proc->pagesinmem, proc->pid, proc->name);
+  //cprintf("no. of pages allocated on exec:%d, pid:%d, name:%s\n", proc->pagesinmem, proc->pid, proc->name);
   //if(strcmp(proc->name, "sh") == 0)
     // if(SELECTION == FIFO)
     //   cprintf("\n\n SHELL PRINTING FIFO\n\n");
