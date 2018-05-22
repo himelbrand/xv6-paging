@@ -316,7 +316,7 @@ void recordNewPage(char *va)
 #ifdef NFUA
       nfuRecord(va);
 #else
-#ifdef LAFA
+#ifdef LAPA
       nfuRecord(va);
 #endif
 #endif
