@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "kalloc.h"
 
 #define AGE_INC 0x80000000            // adding 1 to the counter msb
 #define SHIFT_COUNTER(x) (x >> 1);    // for shifting the counter
@@ -663,9 +664,13 @@ void procdump(void)
       for (i = 0; i < 10 && pc[i] != 0; i++)
         cprintf(" %p", pc[i]);
     }
+    
     // cprintf("[0]=%x , [1]=%x [2]=%x what??\n",p->freepages[0].va,p->freepages[1].va,p->freepages[2].va);
     cprintf("\n");
   }
+  #ifdef VERBOSE_PRINT
+    cprintf("\n %d / %d free pages in the system\n",  physicalPagesCounts.currentFreePagesNo,physicalPagesCounts.totalFreePages );
+    #endif
 }
 
 // Purpose: Iterate over all the procceses pages
