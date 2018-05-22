@@ -691,7 +691,7 @@ void updateNFU(void){
 
         // checking if the fist page table is present
         if(*pde & PTE_P){
-          pgtab = (pte_t*)p2v(PTE_ADDR(*pde));
+          pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
           pte = &pgtab[PTX(p->freepages[i].va)];
         }
 
