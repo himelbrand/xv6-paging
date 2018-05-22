@@ -213,6 +213,8 @@ int fork(void)
   }
 
   // Copy process state from proc.
+      //  cprintf("curproc->sz = %d\n",curproc->sz);
+
   if ((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0)
   {
     kfree(np->kstack);
@@ -245,7 +247,7 @@ int fork(void)
   // read the parent's swap file in chunks of size PGDIR/2, otherwise for some
   // reason, you get "panic acquire" if buf is ~4000 bytes
   // copying swapfile data from parent
-  if (strcmp(curproc->name, "init") != 0 && strcmp(curproc->name, "sh") != 0)
+  if (curproc->pid > 2 || (strcmp(curproc->name, "init") != 0 && strcmp(curproc->name, "sh") != 0))
   {
     while ((nread = readFromSwapFile(curproc, buf, offset, PGSIZE / 2)) != 0)
     {
@@ -261,6 +263,10 @@ int fork(void)
     np->freepages[i].age = curproc->freepages[i].age;
     np->swappedpages[i].age = curproc->swappedpages[i].age;
     np->swappedpages[i].va = curproc->swappedpages[i].va;
+   // cprintf("swapped i=%d , va=%x\n",i,(uint)np->swappedpages[i].va);
+    //cprintf("free i=%d , va=%x\n",i,(uint)np->freepages[i].va);
+   // cprintf("swaploc :%d\n",curproc->swappedpages[i].swaploc);
+
     np->swappedpages[i].swaploc = curproc->swappedpages[i].swaploc;
   }
 
@@ -273,6 +279,21 @@ int fork(void)
       if (np->freepages[j].va == curproc->freepages[i].prev->va)
         np->freepages[i].prev = &np->freepages[j];
     }
+#if defined(SCFIFO) || defined(AQ)
+  for (i = 0; i < MAX_PSYC_PAGES; i++)
+  {
+    if (curproc->pghead->va == np->freepages[i].va)
+    {
+      //TODO delete       cprintf("\nfork: head copied!\n\n");
+      np->pghead = &np->freepages[i];
+    }
+    if (curproc->pgtail->va == np->freepages[i].va)
+    {
+      np->pgtail = &np->freepages[i];
+      //cprintf("\nfork: head copied!\n\n");
+    }
+  }
+#endif
 
   acquire(&ptable.lock);
 
@@ -380,7 +401,48 @@ int wait(void)
     sleep(curproc, &ptable.lock); //DOC: wait-sleep
   }
 }
+void aqUpdate(void){
+  //cprintf("?\n");
+  struct freepg *mover,*prev,*temp,*oldpgtail;
+  struct proc *proc = myproc();
+  mover=proc->pghead;
+  oldpgtail = proc->pgtail; // to avoid infinite loop if everyone was accessed
+ // cprintf("proc->pghead: %s\n",proc->name);
+  while(oldpgtail != mover){
+     // cprintf("?\n");
 
+    if(mover && checkAccBit(mover->va,1) && mover != proc->pghead){
+      temp = mover->prev;
+      prev = temp->prev;
+      prev->next=mover;
+      temp->next = mover->next;
+       mover->next->prev = temp;
+      temp->prev = mover;
+      mover->next = temp;
+      mover->prev = prev;
+      
+      if(temp == proc->pghead){
+        proc->pghead = mover;
+      }
+      mover = temp->next;
+    }else{
+       mover = mover->next;
+    }
+  }
+ // if(strcmp(proc->name,"initcode") != 0)
+ // cprintf("proc->pghead:done %s\n",proc->name);
+}
+void updateFPages(void){
+  #ifdef AQ
+    aqUpdate();
+  #else
+  #ifdef LAPA
+  #else
+  #ifdef NFUA
+  #endif
+  #endif
+  #endif
+}
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -415,8 +477,11 @@ void scheduler(void)
       p->state = RUNNING;
 
       swtch(&(c->scheduler), p->context);
-      switchkvm();
 
+      #if defined(AQ) || defined(LAPA) || defined(NFUA)
+        updateFPages();
+      #endif
+      switchkvm();
       // Process is done running for now.
       // It should have changed its p->state before coming back.
       c->proc = 0;
@@ -598,6 +663,7 @@ void procdump(void)
       for (i = 0; i < 10 && pc[i] != 0; i++)
         cprintf(" %p", pc[i]);
     }
+    // cprintf("[0]=%x , [1]=%x [2]=%x what??\n",p->freepages[0].va,p->freepages[1].va,p->freepages[2].va);
     cprintf("\n");
   }
 }
