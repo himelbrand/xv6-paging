@@ -123,8 +123,18 @@ found:
     p->freepages[i].va = (char *)0xffffffff;
     p->freepages[i].next = 0;
     p->freepages[i].prev = 0;
+    
+    /* age counter init according to aging policy */
+    #ifdef NFUA
     p->freepages[i].age = 0;
     p->swappedpages[i].age = 0;
+    #else
+    #ifdef LAFA
+    p->freepages[i].age = 0xffffffff;
+    p->swappedpages[i].age =  0xffffffff;
+    #endif
+    #endif
+
     p->swappedpages[i].swaploc = 0;
     p->swappedpages[i].va = (char *)0xffffffff;
   }
@@ -663,7 +673,6 @@ void procdump(void)
       for (i = 0; i < 10 && pc[i] != 0; i++)
         cprintf(" %p", pc[i]);
     }
-    // cprintf("[0]=%x , [1]=%x [2]=%x what??\n",p->freepages[0].va,p->freepages[1].va,p->freepages[2].va);
     cprintf("\n");
   }
 }
@@ -684,8 +693,8 @@ void updateNFU(void){
         if (p->freepages[i].va == (char*)0xffffffff)
           continue;
         // adding 1 to the counters
-        ++p->freepages[i].age;
-        ++p->swappedpages[i].age;
+        p->freepages[i].age++;
+        p->swappedpages[i].age++;
         
         pde = &p->pgdir[PDX(p->freepages[i].va)];
 
@@ -694,7 +703,6 @@ void updateNFU(void){
           pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
           pte = &pgtab[PTX(p->freepages[i].va)];
         }
-
         else 
           pte = 0;
 

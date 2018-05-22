@@ -57,6 +57,10 @@ void trap(struct trapframe *tf)
         updateNFU();
       #endif
 
+      #if LAPA
+        updateNFU();
+      #endif
+        
       ticks++;
       wakeup(&ticks);
       release(&tickslock);

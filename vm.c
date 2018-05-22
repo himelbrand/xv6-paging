@@ -314,9 +314,11 @@ void recordNewPage(char *va)
 
 #else
 #ifdef NFUA
-  //TODO: add by hanan
       nfuRecord(va);
-
+#else
+#ifdef LAFA
+      nfuRecord(va);
+#endif
 #endif
 #endif
 #endif
@@ -324,6 +326,7 @@ void recordNewPage(char *va)
   myproc()->pagesinmem++;
   //TODO delete cprintf("\n++++++++++++++++++ proc->pagesinmem+++++++++++++ : %d\n", proc->pagesinmem);
 }
+
 struct freepg *scWrite(char *va)
 {
   //cprintf("scWrite: %x\n",(uint)va);
@@ -480,7 +483,11 @@ struct freepg* pg =aqWrite(va);
   return pg;
 #else
 #ifdef NFUA
-  return nfuWrite(va);
+  struct freepg* pg =nfuWrite(va);
+#else
+#ifdef LAPA
+  struct freepg* pg =lapaWrite(va);
+#endif
 #endif
 #endif
 #endif
@@ -985,11 +992,12 @@ void nfuRecord(char *va){
   int i;
   for (i = 0; i < MAX_PSYC_PAGES; i++)
     if (proc->freepages[i].va == (char*)0xffffffff)
-      goto foundrnp;
+      goto found;
   cprintf("panic follows, pid:%d, name:%s\n", proc->pid, proc->name);
   panic("recordNewPage: no free pages");
-foundrnp:
-  proc->freepages[i].va = va;
+  
+  found:
+    proc->freepages[i].va = va;
 }
 
 
@@ -1074,11 +1082,6 @@ void nfuSwap(uint addr) {
   if(maxIndx == -1)
     panic("nfuSwap: no free page to swap???");
   chosen = &proc->freepages[maxIndx];
-
-  // if(DEBUG){
-  //   //cprintf("\naddress between 0x%x and 0x%x was accessed but was on disk.\n", addr, addr+PGSIZE);
-  //   cprintf("NFU chose to page out page starting at 0x%x \n\n", chosen->va);
-  // }
 
   //find the address of the page table entry to copy into the swap file
   pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);

@@ -47,7 +47,7 @@ struct pgdesc {
 //free page link in linkedlist of physical pages
 struct freepg {
   char *va;
-  int age;
+  uint age;
   struct freepg *next;
   struct freepg *prev;
 };

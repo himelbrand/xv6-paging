@@ -146,7 +146,7 @@ exec(char *path, char **argv)
   // backup and reset proc fields
 #ifndef NONE
   //TODO delete   cprintf("EXEC: NONE undefined (proc = %s)- backing up page info \n", proc->name);
- int pagesinmem = proc->pagesinmem;
+  int pagesinmem = proc->pagesinmem;
   int pagesinswapfile = proc->pagesinswapfile;
   int totalPageFaultCount = proc->totalPageFaultCount;
   int totalPagedOutCount = proc->totalPagedOutCount;
