@@ -52,6 +52,11 @@ void trap(struct trapframe *tf)
     if (cpuid() == 0)
     {
       acquire(&tickslock);
+      // update the pages ages before the next tick
+      #if NFUA
+        updateNFU();
+      #endif
+
       ticks++;
       wakeup(&ticks);
       release(&tickslock);
@@ -92,7 +97,6 @@ void trap(struct trapframe *tf)
         // cprintf("page is in swap file, pid %d, va %p\n", proc->pid, addr); //TODO delete
         handlePageFault(PTE_ADDR(addr));//handle swap pages by SELECTION
         ++myproc()->totalPageFaultCount;
-        // cprintf("proc->totalPageFaultCount:%d\n", ++proc->totalPageFaultCount);//TODO delete
         return;
       }
     }
