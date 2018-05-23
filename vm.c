@@ -281,11 +281,11 @@ struct freepg *nfuWrite(char *va) {
   uint curOnes;
 
   #if LAPA
-    Indx = -1 
+    Indx = -1;
     curOnes = 32; // 32 bit system
     
   #elif NFUA
-    Indx = -1 
+    Indx = -1;
     curOnes = 0;
   #endif
 
@@ -312,7 +312,7 @@ foundswappedpageslot:
       // checking the number of '1' bits in the age
       while(tempAge != 0){
         if(tempAge % 2 != 0)
-          numOfones++
+          numOfones++;
         tempAge = tempAge / 2;
       }
 
