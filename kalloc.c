@@ -8,10 +8,12 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
+#include "ppgc.h"
+
+struct physicalPagesCounts physicalPagesCounts;
 
 void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
-                   // defined by the kernel linker script in kernel.ld
 
 struct run {
   struct run *next;
@@ -34,12 +36,20 @@ kinit1(void *vstart, void *vend)
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
   freerange(vstart, vend);
+
+  // physicalPagesCounts is a struct defined in ppgc.h to hold info needed to cumpute percent of free physcal pages
+  // all physical pages allocated to the kernel's allocator's "freelist" are allocated in kinit1 & kinit2
+  // here we update the # of pages inserted to free list in kinit1
+  physicalPagesCounts.totalFreePages = (PGROUNDDOWN((uint)vend) - PGROUNDUP((uint)vstart)) / PGSIZE;
+  
 }
 
 void
 kinit2(void *vstart, void *vend)
 {
   freerange(vstart, vend);
+  // update the # of pages inserted to free list in kinit2
+  physicalPagesCounts.totalFreePages += (PGROUNDDOWN((uint)vend) - PGROUNDUP((uint)vstart)) / PGSIZE;
   kmem.use_lock = 1;
 }
 
@@ -61,8 +71,10 @@ kfree(char *v)
 {
   struct run *r;
 
-  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
+  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP){
     panic("kfree");
+
+  }
 
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
@@ -71,7 +83,9 @@ kfree(char *v)
     acquire(&kmem.lock);
   r = (struct run*)v;
   r->next = kmem.freelist;
+
   kmem.freelist = r;
+  physicalPagesCounts.currentFreePagesNo++;
   if(kmem.use_lock)
     release(&kmem.lock);
 }
@@ -87,10 +101,11 @@ kalloc(void)
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r){
     kmem.freelist = r->next;
+    physicalPagesCounts.currentFreePagesNo--;
+  }
   if(kmem.use_lock)
     release(&kmem.lock);
   return (char*)r;
 }
-
