@@ -124,7 +124,7 @@ void            userinit(void);
 int             wait(void);
 void            wakeup(void*);
 void            yield(void);
-void 			updateNFU(void);
+void 			updateAge(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -196,7 +196,7 @@ void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
 void            handlePageFault(uint);
-int             checkAccBit(char *va,int clear);
+int             checkAndClearFlag(char *va,int clear,int flag);
 void            checkProcAccBit(void);
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

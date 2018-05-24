@@ -8,9 +8,7 @@
 #include "elf.h"
 
 #define BUF_SIZE PGSIZE / 4
-#define MAX_POSSIBLE ~0x80000000
 
-#define ADD_TO_AGE 0x40000000
 
 extern char data[]; // defined by kernel.ld
 pde_t *kpgdir;      // for use in scheduler()
@@ -81,17 +79,17 @@ void checkProcAccBit()
     }
 }
 
-int checkAccBit(char *va,int clear)
+int checkAndClearFlag(char *va,int clear,int flag)
 { //checks if page at va has Access bit on and clears the bit
   uint accessed;
   struct proc *proc = myproc();
   pte_t *pte = walkpgdir(proc->pgdir, (void *)va, 0);
   if (!*pte)
-    panic("checkAccBit: pte1 is empty");
-  accessed = (*pte) & PTE_A;
-  if(clear) (*pte) &= ~PTE_A;
+    panic("checkAndClearFlag: pte1 is empty");
+  accessed = (*pte) & flag;
+  if(clear) (*pte) &= ~flag;
   #ifdef SCFIFO
-    if((uint)va <= 0x2000)
+    if((uint)va <= 0x2000 && flag == PTE_A)
     (*pte) |= PTE_A;
   #endif
   return accessed;
@@ -112,10 +110,10 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
     if ((pte = walkpgdir(pgdir, a, 1)) == 0)
       return -1;
     if (*pte & PTE_P)
-      panic("remap");
-    if (*pte & PTE_PG) //added this
-      *pte ^= PTE_PG;//and this
-     *pte = pa | perm | PTE_P;
+      panic("remap");    
+    *pte = pa | perm | PTE_P;
+ 
+
     if (a == last)
       break;
     a += PGSIZE;
@@ -261,57 +259,26 @@ int loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
   }
   return 0;
 }
-void scRecord(char *va)
-{
-  int i;
-  struct proc *proc = myproc();
-  for (i = 0; i < MAX_PSYC_PAGES; i++)
-    if (proc->freepages[i].va == (char *)0xffffffff)
-      goto foundrnp;
-  cprintf("panic follows, pid:%d, name:%s\n", proc->pid, proc->name);
-  panic("recordNewPage: no free pages");
-foundrnp:
-  //TODO delete cprintf("found unused page!\n");
-  proc->freepages[i].va = va;
-  proc->freepages[i].next = proc->pghead;
-  proc->freepages[i].prev = 0;
-  if (proc->pghead != 0) // old head points back to new head
-    proc->pghead->prev = &proc->freepages[i];
-  else //head == 0 so first link inserted is also the tail
-    proc->pgtail = &proc->freepages[i];
-  proc->pghead = &proc->freepages[i];
-}
-void aqRecord(char *va)
-{
-  int i;
-  struct proc *proc = myproc();
-  for (i = 0; i < MAX_PSYC_PAGES; i++)
-    if (proc->freepages[i].va == (char *)0xffffffff)
-      goto foundrnp;
-  cprintf("panic follows, pid:%d, name:%s\n", proc->pid, proc->name);
-  panic("recordNewPage: no free pages");
-foundrnp:
-  //TODO delete cprintf("found unused page!\n");
-  proc->freepages[i].va = va;
-  proc->freepages[i].next = proc->pghead;
-  proc->freepages[i].prev = 0;
-  if (proc->pghead != 0) // old head points back to new head
-    proc->pghead->prev = &proc->freepages[i];
-  else //head == 0 so first link inserted is also the tail
-    proc->pgtail = &proc->freepages[i];
-  proc->pghead = &proc->freepages[i];
-}
-void recordNewPage(char *va)
-{
-#ifdef SCFIFO
- //cprintf("recordNewPage: %s is calling scRecord with: 0x%x\n", myproc()->name, va);
-  scRecord(va);
-#else
-#ifdef AQ
-  //cprintf("recordNewPage: %s is calling scRecord with: 0x%x\n", myproc()->name, va);
-  aqRecord(va);
-    
 
+void initFreePage(char *va)
+{
+#if defined(SCFIFO) || defined(AQ)
+  int i;
+  struct proc *proc = myproc();
+  for (i = 0; i < MAX_PSYC_PAGES; i++)
+    if (proc->freepages[i].va == (char *)0xffffffff)
+      goto foundrnp;
+  cprintf("panic follows, pid:%d, name:%s\n", proc->pid, proc->name);
+  panic("initFreePage: no free pages");
+foundrnp:
+  proc->freepages[i].va = va;
+  proc->freepages[i].next = proc->pghead;
+  proc->freepages[i].prev = 0;
+  if (proc->pghead != 0) // old head points back to new head
+    proc->pghead->prev = &proc->freepages[i];
+  else //head == 0 so first link inserted is also the tail
+    proc->pgtail = &proc->freepages[i];
+  proc->pghead = &proc->freepages[i];
 #else
 #ifdef NFUA
   //TODO: add by hanan
@@ -319,16 +286,14 @@ void recordNewPage(char *va)
 
 #endif
 #endif
-#endif
 
-  myproc()->pagesinmem++;
-  //TODO delete cprintf("\n++++++++++++++++++ proc->pagesinmem+++++++++++++ : %d\n", proc->pagesinmem);
+  myproc()->pagesInRAM++;
+ 
 }
 struct freepg *scWrite(char *va)
 {
-  //cprintf("scWrite: %x\n",(uint)va);
   int i;
-  struct freepg *mover, *oldpgtail;
+  struct freepg *curr, *oldpgtail;
   struct proc *proc = myproc();
   for (i = 0; i < MAX_PSYC_PAGES; i++)
   {
@@ -338,43 +303,44 @@ struct freepg *scWrite(char *va)
   panic("writePageToSwapFile: FIFO no slot for swapped page");
 
 foundswappedpageslot:
-  //link = proc->head;
   if (proc->pghead == 0)
     panic("scWrite: proc->pghead is NULL");
   if (proc->pghead->next == 0)
     panic("scWrite: single page in phys mem");
 
-  mover = proc->pgtail;
-  oldpgtail = proc->pgtail; // to avoid infinite loop if everyone was accessed
+  curr = proc->pgtail;
+  oldpgtail = proc->pgtail; // to avoid infinite loop 
   do
   {
-    //move mover from pgtail to pghead
+    //move curr from pgtail to pghead
     proc->pgtail = proc->pgtail->prev;
     proc->pgtail->next = 0;
-    mover->prev = 0;
-    mover->next = proc->pghead;
-    proc->pghead->prev = mover;
-    proc->pghead = mover;
-    mover = proc->pgtail;
-  } while (checkAccBit(proc->pghead->va,1) && mover != oldpgtail);
-if((uint)proc->pghead->va <= 0x2000){
-    mover = proc->pgtail;
+    curr->prev = 0;
+    curr->next = proc->pghead;
+    proc->pghead->prev = curr;
+    proc->pghead = curr;
+    curr = proc->pgtail;
+  } while (checkAndClearFlag(proc->pghead->va,1,PTE_A) && curr != oldpgtail);
+
+if((uint)proc->pghead->va <= 0x2000){//not to swap user data pages
+    curr = proc->pgtail;
   oldpgtail = proc->pgtail;
     do
   {
-    //move mover from pgtail to pghead
+    //move curr from pgtail to pghead
     proc->pgtail = proc->pgtail->prev;
     proc->pgtail->next = 0;
-    mover->prev = 0;
-    mover->next = proc->pghead;
-    proc->pghead->prev = mover;
-    proc->pghead = mover;
-    mover = proc->pgtail;
-  } while (checkAccBit(proc->pghead->va,1) && mover != oldpgtail);
+    curr->prev = 0;
+    curr->next = proc->pghead;
+    proc->pghead->prev = curr;
+    proc->pghead = curr;
+    curr = proc->pgtail;
+  } while (checkAndClearFlag(proc->pghead->va,1,PTE_A) && curr != oldpgtail);
   }
   //make the swap
   proc->swappedpages[i].va = proc->pghead->va;
   int num = 0;
+
   //write head of physical pages to swapfile
   if ((num = writeToSwapFile(proc, (char *)PTE_ADDR(proc->pghead->va), i * PGSIZE, PGSIZE)) == 0)
     return 0;
@@ -385,24 +351,20 @@ if((uint)proc->pghead->va <= 0x2000){
 
   kfree((char *)PTE_ADDR(P2V_WO(*walkpgdir(proc->pgdir, proc->pghead->va, 0))));
   *pte1 = PTE_W | PTE_U | PTE_PG;
-  ++proc->totalPagedOutCount;
-  ++proc->pagesinswapfile;
+  ++proc->totalPagedOut;
+  ++proc->pagesInSwap;
 
-  //TODO delete   cprintf("++proc->pagesinswapfile : %d", proc->pagesinswapfile);
   //refresh TLB
   lcr3(V2P(proc->pgdir));
   proc->pghead->va = va;
 
-  //TODO cprintf("scWrite: new addr in pghead: 0x%x\n", va);
 
-  // unnecessary but will do for now
   return proc->pghead;
 }
 struct freepg *aqWrite(char *va)
 {
-  //TODO delete  cprintf("scWrite: ");
   int i;
-  struct freepg *mover;
+  struct freepg *curr;
   struct proc *proc = myproc();
   for (i = 3; i < MAX_PSYC_PAGES; i++)
   {
@@ -412,23 +374,21 @@ struct freepg *aqWrite(char *va)
   panic("writePageToSwapFile: AQ no slot for swapped page");
 
 foundswappedpageslot:
-  //link = proc->head;
   if (proc->pghead == 0)
     panic("aqWrite: proc->pghead is NULL");
   if (proc->pghead->next == 0)
     panic("aqWrite: single page in phys mem");
 do{
-  mover = proc->pgtail;
-  //move mover from pgtail to pghead
+  curr = proc->pgtail;
+  //move curr from pgtail to pghead
   proc->pgtail = proc->pgtail->prev;
   proc->pgtail->next = 0;
-  mover->prev = 0;
-  mover->next = proc->pghead;
-  proc->pghead->prev = mover;
-  proc->pghead = mover;
+  curr->prev = 0;
+  curr->next = proc->pghead;
+  proc->pghead->prev = curr;
+  proc->pghead = curr;
 }while((uint)proc->pghead->va <= 0x2000);
-// if(proc->pghead == 0)
-// cprintf("inWrite NULLL\n\n\n\n\n");
+
   //make the swap
   proc->swappedpages[i].va = proc->pghead->va;
   int num = 0;
@@ -442,50 +402,29 @@ do{
 
   kfree((char *)PTE_ADDR(P2V_WO(*walkpgdir(proc->pgdir, proc->pghead->va, 0))));
   *pte1 = PTE_W | PTE_U | PTE_PG;
-  ++proc->totalPagedOutCount;
-  ++proc->pagesinswapfile;
+  ++proc->totalPagedOut;
+  ++proc->pagesInSwap;
 
-  //TODO delete   cprintf("++proc->pagesinswapfile : %d", proc->pagesinswapfile);
   //refresh TLB
   lcr3(V2P(proc->pgdir));
   proc->pghead->va = va;
 
-  //TODO cprintf("scWrite: new addr in pghead: 0x%x\n", va);
-
-  // unnecessary but will do for now
   return proc->pghead;
 }
 
 struct freepg *writePageToSwapFile(char *va)
 {
-  //TODO delete $$$
-
 #ifdef SCFIFO
- // cprintf("writePageToSwapFile: calling scWrite\n");
-  struct freepg* pg = scWrite(va);
- // if(pg != 0)
- // cprintf("va:%x\n",(uint)pg->va);
-  return pg;
+  return scWrite(va);
 #else
 #ifdef AQ
-  //cprintf("\n");
- // cprintf("AQWrite  va:%x\n",va);
-struct freepg* pg =aqWrite(va);
-//  if(pg != 0)
-//   cprintf("Write va:%x\n",(uint)pg->va);
-//   else{
-//       cprintf("Write pg=0 va:%x\n",va);
-
-//   }
-  return pg;
+  return aqWrite(va);
 #else
 #ifdef NFUA
   return nfuWrite(va);
 #endif
 #endif
 #endif
-
-  //TODO: delete cprintf("none of the above...\n");
   return 0;
 }
 // Allocate page tables and physical memory to grow process from oldsz to
@@ -508,13 +447,8 @@ int allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
   for (; a < newsz; a += PGSIZE)
   {
 #ifndef NONE
-    //TODO delete     cprintf("inside #ifndef NONE: checking pages in mem: %d\n", proc->pagesinmem);
-    // TODO: check if we should add another test for init and shel here...
-    if (myproc()->pagesinmem >= MAX_PSYC_PAGES)
+    if (myproc()->pagesInRAM >= MAX_PSYC_PAGES)
     {
-      // TODO delete cprintf("writing to swap file, proc->name: %s, pagesinmem: %d\n", proc->name, proc->pagesinmem);
-
-      //TODO remove l! it doesn't belong here
       if ((pg = writePageToSwapFile((char *)a)) == 0)
         panic("allocuvm: error writing page to swap file");
 #ifdef CSFIFO
@@ -522,7 +456,6 @@ int allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       pg->next = myproc()->pghead;
       myproc()->pghead = pg;
 #endif
-
       newpage = 0;
     }
 #endif
@@ -536,10 +469,7 @@ int allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 #ifndef NONE
     if (newpage)
     {
-      //TODO delete cprintf("nepage = 1");
-      //if(proc->pagesinmem >= 11)
-      //TODO delete cprintf("recorded new page, proc->name: %s, pagesinmem: %d\n", proc->name, proc->pagesinmem);
-      recordNewPage((char *)a);
+      initFreePage((char *)a);
     }
 #endif
     memset(mem, 0, PGSIZE);
@@ -595,8 +525,6 @@ int deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       founddeallocuvmPTEP:
         myproc()->freepages[i].va = (char *)0xffffffff;
 #if defined(SCFIFO) || defined(AQ)
-     //  cprintf("deallocuvm: entering page linked list part %d\n",i);
-
         if (proc->pghead == &proc->freepages[i])
         {
           proc->pghead = proc->freepages[i].next;
@@ -607,7 +535,7 @@ int deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         if (proc->pgtail == &proc->freepages[i])
         {
           proc->pgtail = proc->freepages[i].prev;
-          if (proc->pgtail != 0) // should allways be true but lets be extra safe...
+          if (proc->pgtail != 0) 
             proc->pgtail->next = 0;
           goto doneLooking;
         }
@@ -623,12 +551,11 @@ int deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
         }
 
       doneLooking:
-        //TODO delete cprintf("deallocCount = %d\n", ++deallocCount);
         proc->freepages[i].next = 0;
         proc->freepages[i].prev = 0;
 #endif
 #endif
-        proc->pagesinmem--;
+        proc->pagesInRAM--;
       }
       char *v = P2V(pa);
       kfree(v);
@@ -650,7 +577,7 @@ int deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
       proc->swappedpages[i].va = (char *)0xffffffff;
       proc->swappedpages[i].age = 0;
       proc->swappedpages[i].swaploc = 0;
-      proc->pagesinswapfile--;
+      proc->pagesInSwap--;
     }
   }
   return newsz;
@@ -710,11 +637,16 @@ copyuvm(pde_t *pgdir, uint sz)
     }
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
+   
     if ((mem = kalloc()) == 0)
       goto bad;
     memmove(mem, (char *)P2V(pa), PGSIZE);
+     
     if (mappages(d, (void *)i, PGSIZE, V2P(mem), flags) < 0)
       goto bad;
+    if(!(flags & PTE_P))
+      (*pte) ^= PTE_P;
+    
   }
   return d;
 
@@ -769,40 +701,41 @@ void scSwap(uint addr)
   int i, j;
   char buf[BUF_SIZE];
   pte_t *pte1, *pte2;
-  struct freepg *mover, *oldpgtail;
+  struct freepg *curr, *oldpgtail;
 
   if (proc->pghead == 0)
     panic("scSwap: proc->pghead is NULL");
   if (proc->pghead->next == 0)
     panic("scSwap: single page in phys mem");
 
-  mover = proc->pgtail;
+  curr = proc->pgtail;
   oldpgtail = proc->pgtail; // to avoid infinite loop if somehow everyone was accessed
   do
   {
-    //move mover from pgtail to pghead
+    //move curr from pgtail to pghead
     proc->pgtail = proc->pgtail->prev;
     proc->pgtail->next = 0;
-    mover->prev = 0;
-    mover->next = proc->pghead;
-    proc->pghead->prev = mover;
-    proc->pghead = mover;
-    mover = proc->pgtail;
-  } while (checkAccBit(proc->pghead->va,1) && mover != oldpgtail);
+    curr->prev = 0;
+    curr->next = proc->pghead;
+    proc->pghead->prev = curr;
+    proc->pghead = curr;
+    curr = proc->pgtail;
+ 
+  } while (checkAndClearFlag(proc->pghead->va,1,PTE_A) && curr != oldpgtail);
   if((uint)proc->pghead->va <= 0x2000){
-    mover = proc->pgtail;
+    curr = proc->pgtail;
   oldpgtail = proc->pgtail;
     do
   {
-    //move mover from pgtail to pghead
+    //move curr from pgtail to pghead
     proc->pgtail = proc->pgtail->prev;
     proc->pgtail->next = 0;
-    mover->prev = 0;
-    mover->next = proc->pghead;
-    proc->pghead->prev = mover;
-    proc->pghead = mover;
-    mover = proc->pgtail;
-  } while (checkAccBit(proc->pghead->va,1) && mover != oldpgtail);
+    curr->prev = 0;
+    curr->next = proc->pghead;
+    proc->pghead->prev = curr;
+    proc->pghead = curr;
+    curr = proc->pgtail;
+  } while (checkAndClearFlag(proc->pghead->va,1,PTE_A) && curr != oldpgtail);
   }
   //find the address of the page table entry to copy into the swap file
   pte1 = walkpgdir(proc->pgdir, (void *)proc->pghead->va, 0);
@@ -859,36 +792,24 @@ void aqSwap(uint addr)
   int i, j;
   char buf[BUF_SIZE];
   pte_t *pte1, *pte2;
-  struct freepg *mover;
+  struct freepg *curr;
 
   if (proc->pghead == 0)
     panic("aqSwap: proc->pghead is NULL");
   if (proc->pghead->next == 0)
     panic("aqSwap: single page in phys mem");
 
-//   mover = proc->pgtail;
-//   //move mover from pgtail to pghead
-//   proc->pgtail = proc->pgtail->prev;
-//   proc->pgtail->next = 0;
-//   mover->prev = 0;
-//   mover->next = proc->pghead;
-//   proc->pghead->prev = mover;
-//   proc->pghead = mover;
-// if(proc->pghead == 0)
-// cprintf("inSwap NULLL\n\n\n\n\n");
 do{
-  mover = proc->pgtail;
-  //move mover from pgtail to pghead
+  curr = proc->pgtail;
+  //move curr from pgtail to pghead
   proc->pgtail = proc->pgtail->prev;
   proc->pgtail->next = 0;
-  mover->prev = 0;
-  mover->next = proc->pghead;
-  proc->pghead->prev = mover;
-  proc->pghead = mover;
-}while((uint)proc->pghead->va <= 0x2000);
-//  if(proc->pghead == 0)
-//  cprintf("inWrite NULLL\n\n\n\n\n");
-  //find the address of the page table entry to copy into the swap file
+  curr->prev = 0;
+  curr->next = proc->pghead;
+  proc->pghead->prev = curr;
+  proc->pghead = curr;
+}while((uint)proc->pghead->va <= 0x2000);//swap only user private pages
+
   pte1 = walkpgdir(proc->pgdir, (void *)proc->pghead->va, 0);
   if (!*pte1)
     panic("swapFile: AQ pte1 is empty");
@@ -944,21 +865,14 @@ void handlePageFault(uint addr)
   struct proc *proc = myproc();
   if (strcmp(proc->name, "init") == 0 || strcmp(proc->name, "sh") == 0)
   {
-    proc->pagesinmem++;
+    proc->pagesInRAM++;
     return;
   }
-  //TODO delete $$$
-// if(proc->pid > 2)
-//   cprintf("[0]=%x , [1]=%x [2]=%x what??\n",proc->freepages[0].va,proc->freepages[1].va,proc->freepages[2].va);
 #ifdef SCFIFO
-  // cprintf("handlePageFault: calling scSwap\n");
   scSwap(addr);
 #else
 #ifdef AQ
-  // cprintf("handlePageFault: calling aqSwap\n");
   aqSwap(addr);
-  // cprintf("handlePageFault: done aqSwap\n");
-
 #else
 #ifdef NFUA
     nfuSwap(addr);
@@ -966,10 +880,7 @@ void handlePageFault(uint addr)
 #endif
 #endif
   lcr3(V2P(proc->pgdir));
-  ++proc->totalPagedOutCount;
-  // cprintf("handlePageFault:proc->totalPagedOutCount:%d\n", ++proc->totalPagedOutCount);//TODO delete
-  // if(proc->pid > 2)
-  // cprintf("[0]=%x , [1]=%x [2]=%x what??\n",proc->freepages[0].va,proc->freepages[1].va,proc->freepages[2].va);
+  ++proc->totalPagedOut;
 }
 
 //PAGEBREAK!
@@ -987,7 +898,7 @@ void nfuRecord(char *va){
     if (proc->freepages[i].va == (char*)0xffffffff)
       goto foundrnp;
   cprintf("panic follows, pid:%d, name:%s\n", proc->pid, proc->name);
-  panic("recordNewPage: no free pages");
+  panic("initFreePage: no free pages");
 foundrnp:
   proc->freepages[i].va = va;
 }
@@ -1043,8 +954,8 @@ foundswappedpageslot:
 
   kfree((char*)PTE_ADDR(P2V_WO(*walkpgdir(proc->pgdir, chosen->va, 0))));
   *pte1 = PTE_W | PTE_U | PTE_PG;
-  ++proc->totalPagedOutCount;
-  ++proc->pagesinswapfile;
+  ++proc->totalPagedOut;
+  ++proc->pagesInSwap;
 
   lcr3(V2P(proc->pgdir));
   chosen->va = va;
