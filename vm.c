@@ -266,23 +266,24 @@ int loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 void nfuaSwap(uint addr) {
   int i, j;
   struct proc  *proc =myproc();
-  uint maxIndx = 0xffffffff, maxAge = 0;// MAX_POSSIBLE;
+  uint maxIndex = 0xffffffff, maxAge = 0;// MAX_POSSIBLE;
   char buf[BUF_SIZE];
   pte_t *pte1, *pte2;
   struct freepg *chosen;
 
 
-  for (j = 0; j < MAX_PSYC_PAGES; j++)
+  for (j = 3; j < MAX_PSYC_PAGES; j++)
     if (proc->freepages[j].va != (char*)0xffffffff){
       if (proc->freepages[j].age > maxAge){
         maxAge = proc->freepages[j].age;
-        maxIndx = j;
+        maxIndex = j;
       }
     }
+  maxIndex = maxIndex == -1 && proc->freepages[3].age == maxAge ? 3 : maxIndex;
 
-  if(maxIndx == -1)
+  if(maxIndex == -1)
     panic("nfuSwap: no free page to swap???");
-  chosen = &proc->freepages[maxIndx];
+  chosen = &proc->freepages[maxIndex];
 
   //find the address of the page table entry to copy into the swap file
   pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
@@ -351,23 +352,24 @@ foundswappedpageslot:
 void lapaSwap(uint addr) {
   int i, j;
   struct proc  *proc =myproc();
-  uint maxIndx = 0xffffffff, numOfOnes = 32;// MAX_POSSIBLE;
+  uint maxIndex = 0xffffffff, numOfOnes = 32;// MAX_POSSIBLE;
   char buf[BUF_SIZE];
   pte_t *pte1, *pte2;
   struct freepg *chosen;
 
 
-  for (j = 0; j < MAX_PSYC_PAGES; j++)
+  for (j = 3; j < MAX_PSYC_PAGES; j++)
     if (proc->freepages[j].va != (char*)0xffffffff){
       if (getOneBits(proc->freepages[j].age) < numOfOnes){
         numOfOnes = getOneBits(proc->freepages[j].age);
-        maxIndx = j;
+        maxIndex = j;
       }
     }
+  maxIndex = maxIndex == -1 && getOneBits(proc->freepages[3].age) == numOfOnes ? 3 : maxIndex;
 
-  if(maxIndx == -1)
+  if(maxIndex == -1)
     panic("nfuSwap: no free page to swap???");
-  chosen = &proc->freepages[maxIndx];
+  chosen = &proc->freepages[maxIndex];
 
   //find the address of the page table entry to copy into the swap file
   pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
@@ -539,6 +541,8 @@ if((uint)proc->pghead->va <= 0x2000){//not to swap user data pages
 
 
 struct freepg *lapaWrite(char *va) {
+    cprintf("lapa swap addr:%x\n",va);
+
   int i, j;
   uint ind = -1, maxOnes = 32; //MAX_POSSIBLE;
   struct freepg *chosen;
@@ -552,7 +556,7 @@ struct freepg *lapaWrite(char *va) {
   panic("writePageToSwapFile: LAPA no slot for swapped page");
 
 foundswappedpageslot:
-  for (j = 0; j < MAX_PSYC_PAGES; j++){
+  for (j = 3; j < MAX_PSYC_PAGES; j++){
   //  cprintf("one bits in page j=%d age is: %d \nand freepages va is: ", j, getOneBits(proc->freepages[j].age), proc->freepages[j].va);
     if (proc->freepages[j].va != (char*)0xffffffff){
       if (getOneBits(proc->freepages[j].age) < maxOnes){
@@ -561,7 +565,7 @@ foundswappedpageslot:
       }
     }
   }
-
+  ind = ind == -1 && getOneBits(proc->freepages[3].age) == maxOnes ? 3 : ind;
   if(ind == -1)
     panic("lapaWrite: no free page to swap");
   chosen = &proc->freepages[ind];
@@ -602,7 +606,7 @@ foundswappedpageslot:
 
 struct freepg *nfuaWrite(char *va) {
   int i, j;
-  uint maxIndx = -1, maxAge = 0; //MAX_POSSIBLE;
+  uint maxIndex = -1, maxAge = 0; //MAX_POSSIBLE;
   struct freepg *chosen;
   struct proc * proc =myproc();
 
@@ -614,18 +618,19 @@ struct freepg *nfuaWrite(char *va) {
   panic("writePageToSwapFile: NFUA no slot for swapped page");
 
 foundswappedpageslot:
-  for (j = 0; j < MAX_PSYC_PAGES; j++){
+  for (j = 3; j < MAX_PSYC_PAGES; j++){
     if (proc->freepages[j].va != (char*)0xffffffff){
+      // cprintf("proc->freepages[j].va = %x ,age=%x , j=%d , maxAge=%x\n",proc->freepages[j].va,proc->freepages[j].age,j,maxAge);
       if (proc->freepages[j].age > maxAge){
         maxAge = proc->freepages[j].age;
-        maxIndx = j;
+        maxIndex = j;
       }
     }
   }
-
-  if(maxIndx == -1)
-    panic("nfuWrite: no free page to swap");
-  chosen = &proc->freepages[maxIndx];
+  maxIndex = maxIndex == -1 && proc->freepages[3].age == maxAge ? 3 : maxIndex;
+  if(maxIndex == -1)
+    panic("nfuaWrite: no free page to swap");
+  chosen = &proc->freepages[maxIndex];
 
   pte_t *pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
   if (!*pte1)
@@ -1178,12 +1183,14 @@ void handlePageFault(uint addr)
 #else
 #ifdef NFUA
     nfuaSwap(addr);
+#else
 #ifdef LAPA
     lapaSwap(addr);
 #endif
 #endif
 #endif
 #endif
+
   lcr3(V2P(proc->pgdir));
   ++proc->totalPagedOut;
 }
