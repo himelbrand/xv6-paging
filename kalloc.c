@@ -8,7 +8,7 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "spinlock.h"
-#include "kalloc.h"
+#include "ppgc.h"
 
 struct physicalPagesCounts physicalPagesCounts;
 
@@ -38,7 +38,7 @@ kinit1(void *vstart, void *vend)
   kmem.use_lock = 0;
   freerange(vstart, vend);
 
-  // physicalPagesCounts is a struct defined in kalloc.h to hold info needed to cumpute percent of free physcal pages
+  // physicalPagesCounts is a struct defined in ppgc.h to hold info needed to cumpute percent of free physcal pages
   // all physical pages allocated to the kernel's allocator's "freelist" are allocated in kinit1 & kinit2
   // here we update the # of pages inserted to free list in kinit1
   physicalPagesCounts.totalFreePages = (PGROUNDDOWN((uint)vend) - PGROUNDUP((uint)vstart)) / PGSIZE;
@@ -73,8 +73,10 @@ kfree(char *v)
 {
   struct run *r;
 
-  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
+  if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP){
     panic("kfree");
+
+  }
 
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);

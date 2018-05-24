@@ -52,11 +52,6 @@ void trap(struct trapframe *tf)
     if (cpuid() == 0)
     {
       acquire(&tickslock);
-      // update the pages ages before the next tick
-      #if NFUA
-        updateNFU();
-      #endif
-
       ticks++;
       wakeup(&ticks);
       release(&tickslock);
@@ -88,15 +83,15 @@ void trap(struct trapframe *tf)
     addr = rcr2();
     vaddr = &myproc()->pgdir[PDX(addr)];
 
-   // cprintf("PGFLT --- addr:0x%x vaddr:0x%x PDX:0x%x PTX:0x%x FLAGS:0x%x\n", addr, vaddr, PDX(*vaddr),PTX(*vaddr),PTE_FLAGS(*vaddr)); //TODO delete
-   // cprintf("&PTE_PG:%x &PTE_P:%x  &PTE_P:%x\n", (((uint*)PTE_ADDR(P2V(*vaddr)))[PTX(addr)] & PTE_PG), ((((uint*)PTE_ADDR(P2V(*vaddr)))[PTX(addr)] & PTE_P)),PDX(addr)); //TODO delete
+    //cprintf("PGFLT --- addr:0x%x vaddr:0x%x PDX:0x%x PTX:0x%x FLAGS:0x%x\n", addr, vaddr, PDX(*vaddr),PTX(*vaddr),PTE_FLAGS(*vaddr)); //TODO delete
+    //cprintf("&PTE_PG:%x &PTE_P:%x  &PTE_P:%x\n", (((uint*)PTE_ADDR(P2V(*vaddr)))[PTX(addr)] & PTE_PG), ((((uint*)PTE_ADDR(P2V(*vaddr)))[PTX(addr)] & PTE_P)),PDX(addr)); //TODO delete
     if (((int)(*vaddr) & PTE_P) != 0)
     { // if page table isn't present at page directory -> hard page fault
       if (((uint *)PTE_ADDR(P2V(*vaddr)))[PTX(addr)] & PTE_PG)
       { // if the page is in the process's swap file
         // cprintf("page is in swap file, pid %d, va %p\n", proc->pid, addr); //TODO delete
         handlePageFault(PTE_ADDR(addr));//handle swap pages by SELECTION
-        ++myproc()->totalPageFaultCount;
+        ++myproc()->totalPageFaults;
         return;
       }
     }

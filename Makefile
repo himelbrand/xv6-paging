@@ -90,6 +90,7 @@ CFLAGS += -D $(SELECTION)
 ifeq ($(VERBOSE_PRINT),TRUE)
 CFLAGS += -D VERBOSE_PRINT
 endif
+
 ASFLAGS = -m32 -gdwarf-2 -Wa,-divide
 # FreeBSD ld wants ``elf_i386_fbsd''
 LDFLAGS += -m $(shell $(LD) -V | grep elf_i386 2>/dev/null | head -n 1)

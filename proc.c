@@ -6,10 +6,8 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-#include "kalloc.h"
+#include "ppgc.h"
 
-#define AGE_INC 0x80000000            // adding 1 to the counter msb
-#define SHIFT_COUNTER(x) (x >> 1);    // for shifting the counter
 
 struct
 {
@@ -124,15 +122,24 @@ found:
     p->freepages[i].va = (char *)0xffffffff;
     p->freepages[i].next = 0;
     p->freepages[i].prev = 0;
+    
+    /* age counter init according to aging policy */
+    #ifdef NFUA
     p->freepages[i].age = 0;
     p->swappedpages[i].age = 0;
-    p->swappedpages[i].swaploc = 0;
+    #else
+    #ifdef LAFA
+    p->freepages[i].age = 0xffffffff;
+    p->swappedpages[i].age =  0xffffffff;
+    #endif
+    #endif
+
     p->swappedpages[i].va = (char *)0xffffffff;
   }
-  p->pagesinmem = 0;
-  p->pagesinswapfile = 0;
-  p->totalPageFaultCount = 0;
-  p->totalPagedOutCount = 0;
+  p->pagesInRAM = 0;
+  p->pagesInSwap = 0;
+  p->totalPageFaults = 0;
+  p->totalPagedOut = 0;
   p->pghead = 0;
   p->pgtail = 0;
   return p;
@@ -223,8 +230,8 @@ int fork(void)
     np->state = UNUSED;
     return -1;
   }
-  np->pagesinmem = curproc->pagesinmem;
-  np->pagesinswapfile = curproc->pagesinswapfile;
+  np->pagesInRAM = curproc->pagesInRAM;
+  np->pagesInSwap = curproc->pagesInSwap;
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
@@ -266,11 +273,12 @@ int fork(void)
     np->swappedpages[i].va = curproc->swappedpages[i].va;
    // cprintf("swapped i=%d , va=%x\n",i,(uint)np->swappedpages[i].va);
     //cprintf("free i=%d , va=%x\n",i,(uint)np->freepages[i].va);
-   // cprintf("swaploc :%d\n",curproc->swappedpages[i].swaploc);
 
-    np->swappedpages[i].swaploc = curproc->swappedpages[i].swaploc;
+    //np->swappedpages[i].swaploc = curproc->swappedpages[i].swaploc;
   }
 
+
+#if defined(SCFIFO) || defined(AQ)
   //relink linked list of free pages in child
   for (i = 0; i < MAX_PSYC_PAGES; i++)
     for (j = 0; j < MAX_PSYC_PAGES; ++j)
@@ -279,8 +287,8 @@ int fork(void)
         np->freepages[i].next = &np->freepages[j];
       if (np->freepages[j].va == curproc->freepages[i].prev->va)
         np->freepages[i].prev = &np->freepages[j];
+        
     }
-#if defined(SCFIFO) || defined(AQ)
   for (i = 0; i < MAX_PSYC_PAGES; i++)
   {
     if (curproc->pghead->va == np->freepages[i].va)
@@ -404,43 +412,78 @@ int wait(void)
 }
 void aqUpdate(void){
   //cprintf("?\n");
-  struct freepg *mover,*prev,*temp,*oldpgtail;
+  struct freepg *curr,*prev,*temp,*oldpgtail;
   struct proc *proc = myproc();
-  mover=proc->pghead;
+  curr=proc->pghead;
   oldpgtail = proc->pgtail; // to avoid infinite loop if everyone was accessed
  // cprintf("proc->pghead: %s\n",proc->name);
-  while(oldpgtail != mover){
-     // cprintf("?\n");
-
-    if(mover && checkAccBit(mover->va,1) && mover != proc->pghead){
-      temp = mover->prev;
+  while(oldpgtail != curr){
+    if(curr && checkAndClearFlag(curr->va,1,PTE_A) && curr != proc->pghead){
+      temp = curr->prev;
       prev = temp->prev;
-      prev->next=mover;
-      temp->next = mover->next;
-       mover->next->prev = temp;
-      temp->prev = mover;
-      mover->next = temp;
-      mover->prev = prev;
+      prev->next=curr;
+      temp->next = curr->next;
+       curr->next->prev = temp;
+      temp->prev = curr;
+      curr->next = temp;
+      curr->prev = prev;
       
       if(temp == proc->pghead){
-        proc->pghead = mover;
+        proc->pghead = curr;
       }
-      mover = temp->next;
+      curr = temp->next;
     }else{
-       mover = mover->next;
+       curr = curr->next;
     }
   }
- // if(strcmp(proc->name,"initcode") != 0)
- // cprintf("proc->pghead:done %s\n",proc->name);
+
 }
-void updateFPages(void){
+// Purpose: Iterate over all the procceses pages
+// and update the age counter
+void updateAge(void){
+  struct proc *p;
+  int i;
+  pte_t *pte, *pde, *pgtab;
+
+  acquire(&ptable.lock);
+  
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if((p->state == SLEEPING || p->state == RUNNABLE || p->state == RUNNING) && (p->pid > 2)){
+      for (i = 0; i < MAX_PSYC_PAGES; i++){
+        
+        if (p->freepages[i].va == (char*)0xffffffff)
+          continue;
+        // adding 1 to the counters
+        p->freepages[i].age++;
+        p->swappedpages[i].age++;
+        
+        pde = &p->pgdir[PDX(p->freepages[i].va)];
+
+        // checking if the fist page table is present
+        if(*pde & PTE_P){
+          pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
+          pte = &pgtab[PTX(p->freepages[i].va)];
+        }
+        else 
+          pte = 0;
+
+        if(pte){
+          // checking if the current page was access than add 1 to counter
+          if( *pte & PTE_A){
+            p->freepages[i].age = 0;
+          }
+        }
+      }
+    }
+  }
+  release(&ptable.lock);
+}
+void updatePages(void){
   #ifdef AQ
     aqUpdate();
   #else
-  #ifdef LAPA
-  #else
-  #ifdef NFUA
-  #endif
+  #if defined(LAPA) || defined(NFUA)
+    updateAge();
   #endif
   #endif
 }
@@ -480,7 +523,7 @@ void scheduler(void)
       swtch(&(c->scheduler), p->context);
 
       #if defined(AQ) || defined(LAPA) || defined(NFUA)
-        updateFPages();
+        updatePages();
       #endif
       switchkvm();
       // Process is done running for now.
@@ -657,61 +700,24 @@ void procdump(void)
       state = states[p->state];
     else
       state = "???";
-    cprintf("%d %s %d %d %d %d %s", p->pid, state, p->pagesinmem, p->pagesinswapfile, p->totalPageFaultCount, p->totalPagedOutCount, p->name);
+    cprintf("%d %s %d %d %d %d %s", p->pid, state, p->pagesInRAM, p->pagesInSwap, p->totalPageFaults, p->totalPagedOut, p->name);
     if (p->state == SLEEPING)
     {
       getcallerpcs((uint *)p->context->ebp + 2, pc);
       for (i = 0; i < 10 && pc[i] != 0; i++)
         cprintf(" %p", pc[i]);
     }
-    
-    // cprintf("[0]=%x , [1]=%x [2]=%x what??\n",p->freepages[0].va,p->freepages[1].va,p->freepages[2].va);
+    for(i=0;i<16 && strcmp(p->name, "myMemTest") == 0 ;i++)
+    if((uint)p->swappedpages[i].va != 0xffffffff)
+      cprintf("\narr[%d] is in swap",(((uint)p->swappedpages[i].va - 0x00003000)>>12) & 0x000000ff);
+
+  
     cprintf("\n");
   }
-  #ifdef VERBOSE_PRINT
+    #ifdef VERBOSE_PRINT
     cprintf("\n %d / %d free pages in the system\n",  physicalPagesCounts.currentFreePagesNo,physicalPagesCounts.totalFreePages );
     #endif
 }
 
-// Purpose: Iterate over all the procceses pages
-// and update the age counter
-void updateNFU(void){
-  struct proc *p;
-  int i;
-  pte_t *pte, *pde, *pgtab;
 
-  acquire(&ptable.lock);
-  
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if((p->state == SLEEPING || p->state == RUNNABLE || p->state == RUNNING) && (p->pid > 2)){
-      for (i = 0; i < MAX_PSYC_PAGES; i++){
-        
-        if (p->freepages[i].va == (char*)0xffffffff)
-          continue;
-        // adding 1 to the counters
-        ++p->freepages[i].age;
-        ++p->swappedpages[i].age;
-        
-        pde = &p->pgdir[PDX(p->freepages[i].va)];
-
-        // checking if the fist page table is present
-        if(*pde & PTE_P){
-          pgtab = (pte_t*)P2V(PTE_ADDR(*pde));
-          pte = &pgtab[PTX(p->freepages[i].va)];
-        }
-
-        else 
-          pte = 0;
-
-        if(pte){
-          // checking if the current page was access than add 1 to counter
-          if( *pte & PTE_A){
-            p->freepages[i].age = 0;
-          }
-        }
-      }
-    }
-  }
-  release(&ptable.lock);
-}
 
