@@ -101,7 +101,7 @@ main(int argc, char *argv[]){
 	printf(1, "one page fault should have occurred.\n");
 	#endif
 	#ifdef NFUA
-	printf(1, "NFUA... \n");
+	printf(1, "no page faults should have occurred.\n");
 	#endif
 	#ifdef LAPA
 	printf(1, "LAPA... \n");

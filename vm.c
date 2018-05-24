@@ -346,66 +346,90 @@ foundswappedpageslot:
   chosen->age = 0;
 }
 
-struct freepg *lapaWrite(char *va) {
+// LAPA page swaping policy
+// TODO, split cases to NFUA and LAPA
+void lapaSwap(uint addr) {
   int i, j;
-  uint maxIndx = -1, maxOnes = 32; //MAX_POSSIBLE;
+  struct proc  *proc =myproc();
+  uint maxIndx = 0xffffffff, numOfOnes = 32;// MAX_POSSIBLE;
+  char buf[BUF_SIZE];
+  pte_t *pte1, *pte2;
   struct freepg *chosen;
-  struct proc * proc =myproc();
 
-  for (i = 0; i < MAX_PSYC_PAGES; i++){
-    // checking for available slot 
-    if (proc->swappedpages[i].va != (char*)0xffffffff)
-      goto foundswappedpageslot;
-  }
-  panic("writePageToSwapFile: FIFO no slot for swapped page");
 
-foundswappedpageslot:
-  for (j = 0; j < MAX_PSYC_PAGES; j++){
-    cprintf("lapaWrite at j=%d, the page va is:%x \n", j, proc->freepages[j].va);
-    cprintf("lapaWrite at j=%d, the page age is:%x \n", j, proc->freepages[j].age);
-    if (proc->freepages[j].va == (char*)0xffffffff){
-      if (getOneBits(proc->freepages[j].age) < maxOnes){
-        maxOnes = proc->freepages[j].age;
+  for (j = 0; j < MAX_PSYC_PAGES; j++)
+    if (proc->freepages[j].va != (char*)0xffffffff){
+      if (getOneBits(proc->freepages[j].age) < numOfOnes){
+        numOfOnes = getOneBits(proc->freepages[j].age);
         maxIndx = j;
       }
     }
-  }
 
   if(maxIndx == -1)
-    panic("lapaWrite: no free page to swap");
+    panic("nfuSwap: no free page to swap???");
   chosen = &proc->freepages[maxIndx];
 
-  pte_t *pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
+  //find the address of the page table entry to copy into the swap file
+  pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
   if (!*pte1)
-    panic("writePageToSwapFile: pte1 is empty");
+    panic("nfuSwap: pte1 is empty");
 
-//  b4 accessing by writing to file,
+//  TODO verify: b4 accessing by writing to file,
 //  update accessed bit and age in case it misses a clock tick?
 //  be extra careful not to double add by locking
   acquire(&tickslock);
+  //TODO delete cprintf("acquire(&tickslock)\n");
   if((*pte1) & PTE_A){
     ++chosen->age;
-    *pte1 &= ~PTE_A;    
+    *pte1 &= ~PTE_A;
+    //TODO delete cprintf("========\n\nWOW! Matan was right!\n(never saw this actually printed)=======\n\n");
   }
   release(&tickslock);
 
-  //make swap
+  //find a swap file page descriptor slot
+  for (i = 0; i < MAX_PSYC_PAGES; i++){
+    if (proc->swappedpages[i].va == (char*)PTE_ADDR(addr))
+      goto foundswappedpageslot;
+  }
+  panic("nfuSwap: no slot for swapped page");
+
+foundswappedpageslot:
+
   proc->swappedpages[i].va = chosen->va;
-  int num = 0;
-  if ((num = writeToSwapFile(proc, (char*)PTE_ADDR(chosen->va), i * PGSIZE, PGSIZE)) == 0)
-    return 0;
+  //assign the physical page to addr in the relevant page table
+  pte2 = walkpgdir(proc->pgdir, (void*)addr, 0);
+  if (!*pte2)
+    panic("nfuSwap: pte2 is empty");
+  //set page table entry
+  //TODO verify we're not setting PTE_U where we shouldn't be...
+  *pte2 = PTE_ADDR(*pte1) | PTE_U | PTE_W | PTE_P;// access bit is zeroed...
 
-  kfree((char*)PTE_ADDR(P2V_WO(*walkpgdir(proc->pgdir, chosen->va, 0))));
-  *pte1 = PTE_W | PTE_U | PTE_PG;
-  ++proc->totalPagedOut;
-  ++proc->pagesInSwap;
-
-  lcr3(V2P(proc->pgdir));
-  chosen->va = va;
-
-  return chosen;
+  for (j = 0; j < 4; j++) {
+    int loc = (i * PGSIZE) + ((PGSIZE / 4) * j);
+    // cprintf("i:%d j:%d loc:0x%x\n", i,j,loc);//TODO delete
+    int addroffset = ((PGSIZE / 4) * j);
+    // int read, written;
+    memset(buf, 0, BUF_SIZE);
+    //copy the new page from the swap file to buf
+    // read =
+    readFromSwapFile(proc, buf, loc, BUF_SIZE);
+    // cprintf("read:%d\n", read);//TODO delete
+    //copy the old page from the memory to the swap file
+    //written =
+    writeToSwapFile(proc, (char*)(P2V_WO(PTE_ADDR(*pte1)) + addroffset), loc, BUF_SIZE);
+    // cprintf("written:%d\n", written);//TODO delete
+    //copy the new page from buf to the memory
+    memmove((void*)(PTE_ADDR(addr) + addroffset), (void*)buf, BUF_SIZE);
+  }
+  //update the page table entry flags, reset the physical page address
+  *pte1 = PTE_U | PTE_W | PTE_PG;
+  //update l to hold the new va
+  //l->next = proc->head;
+  //proc->head = l;
+  chosen->va = (char*)PTE_ADDR(addr);
+  // was this missed some how???
+  chosen->age = 0;
 }
-
 
 
 void initFreePage(char *va)
@@ -514,6 +538,68 @@ if((uint)proc->pghead->va <= 0x2000){//not to swap user data pages
 }
 
 
+struct freepg *lapaWrite(char *va) {
+  int i, j;
+  uint ind = -1, maxOnes = 32; //MAX_POSSIBLE;
+  struct freepg *chosen;
+  struct proc * proc =myproc();
+
+  for (i = 0; i < MAX_PSYC_PAGES; i++){
+    // checking for available slot 
+    if (proc->swappedpages[i].va == (char*)0xffffffff)
+      goto foundswappedpageslot;
+  }
+  panic("writePageToSwapFile: LAPA no slot for swapped page");
+
+foundswappedpageslot:
+  for (j = 0; j < MAX_PSYC_PAGES; j++){
+  //  cprintf("one bits in page j=%d age is: %d \nand freepages va is: ", j, getOneBits(proc->freepages[j].age), proc->freepages[j].va);
+    if (proc->freepages[j].va != (char*)0xffffffff){
+      if (getOneBits(proc->freepages[j].age) < maxOnes){
+        maxOnes = getOneBits(proc->freepages[j].age);
+        ind = j;
+      }
+    }
+  }
+
+  if(ind == -1)
+    panic("lapaWrite: no free page to swap");
+  chosen = &proc->freepages[ind];
+
+  pte_t *pte1 = walkpgdir(proc->pgdir, (void*)chosen->va, 0);
+  if (!*pte1)
+    panic("lapaWrite: pte1 is empty");
+
+//  b4 accessing by writing to file,
+//  update accessed bit and age in case it misses a clock tick?
+//  be extra careful not to double add by locking
+  acquire(&tickslock);
+  if((*pte1) & PTE_A){
+    ++chosen->age;
+    *pte1 &= ~PTE_A;    
+  }
+  release(&tickslock);
+
+  //make swap
+  proc->swappedpages[i].va = chosen->va;
+  int num = 0;
+  if ((num = writeToSwapFile(proc, (char*)PTE_ADDR(chosen->va), i * PGSIZE, PGSIZE)) == 0)
+    return 0;
+
+  kfree((char*)PTE_ADDR(P2V_WO(*walkpgdir(proc->pgdir, chosen->va, 0))));
+  *pte1 = PTE_W | PTE_U | PTE_PG;
+  ++proc->totalPagedOut;
+  ++proc->pagesInSwap;
+
+  lcr3(V2P(proc->pgdir));
+  chosen->va = va;
+
+  return chosen;
+}
+
+
+
+
 struct freepg *nfuaWrite(char *va) {
   int i, j;
   uint maxIndx = -1, maxAge = 0; //MAX_POSSIBLE;
@@ -525,16 +611,12 @@ struct freepg *nfuaWrite(char *va) {
     if (proc->swappedpages[i].va == (char*)0xffffffff)
       goto foundswappedpageslot;
   }
-  panic("writePageToSwapFile: FIFO no slot for swapped page");
+  panic("writePageToSwapFile: NFUA no slot for swapped page");
 
 foundswappedpageslot:
   for (j = 0; j < MAX_PSYC_PAGES; j++){
-    cprintf("nfuaWrite at j=%d, the page va is:%x \n", j, proc->freepages[j].va);
-    cprintf("nfuaWrite at j=%d, the page age is:%x \n", j, proc->freepages[j].age);
     if (proc->freepages[j].va != (char*)0xffffffff){
-      cprintf("first if");
       if (proc->freepages[j].age > maxAge){
-        cprintf("second if");
         maxAge = proc->freepages[j].age;
         maxIndx = j;
       }

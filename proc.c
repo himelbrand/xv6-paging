@@ -705,12 +705,14 @@ void procdump(void)
       for (i = 0; i < 10 && pc[i] != 0; i++)
         cprintf(" %p", pc[i]);
     }
+    cprintf("\n");
     for(i=0;i<16 && strcmp(p->name, "myMemTest") == 0 ;i++)
     if((uint)p->swappedpages[i].va != 0xffffffff)
-      cprintf("\narr[%d] is in swap",(((uint)p->swappedpages[i].va - 0x00003000)>>12) & 0x000000ff);
- for(i=0;i<16 ;i++)
-  cprintf("p->freepages[%d].va=%x\n",i,(uint)p->freepages[i].va );
-    cprintf("\n");
+      cprintf("\narr[%d] is in swap\n",(((uint)p->swappedpages[i].va - 0x00003000)>>12) & 0x000000ff);
+ /*   for(i=0;i<16 ;i++)
+      cprintf("p->freepages[%d].va=%x\n",i,(uint)p->freepages[i].va );
+    
+    cprintf("\n");*/
   }
     #ifdef VERBOSE_PRINT
     cprintf("\n %d / %d free pages in the system\n",  physicalPagesCounts.currentFreePagesNo,physicalPagesCounts.totalFreePages );
