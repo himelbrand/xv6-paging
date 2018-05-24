@@ -130,7 +130,7 @@ found:
     p->freepages[i].age = 0;
     p->swappedpages[i].age = 0;
     #else
-    #ifdef LAFA
+    #ifdef LAPA
     p->freepages[i].age = 0xffffffff;
     p->swappedpages[i].age =  0xffffffff;
     #endif
@@ -212,7 +212,7 @@ int growproc(int n)
 // Caller must set state of returned proc to RUNNABLE.
 int fork(void)
 {
-  int i, pid, j;
+  int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
 
@@ -279,6 +279,7 @@ int fork(void)
 
 
 #if defined(SCFIFO) || defined(AQ)
+  int j;
   //relink linked list of free pages in child
   for (i = 0; i < MAX_PSYC_PAGES; i++)
     for (j = 0; j < MAX_PSYC_PAGES; ++j)
@@ -473,6 +474,8 @@ void updateAge(void){
     }
   }
 }
+
+
 void updatePages(void){
   #ifdef AQ
     aqUpdate();
@@ -705,14 +708,12 @@ void procdump(void)
     for(i=0;i<16 && strcmp(p->name, "myMemTest") == 0 ;i++)
     if((uint)p->swappedpages[i].va != 0xffffffff)
       cprintf("\narr[%d] is in swap",(((uint)p->swappedpages[i].va - 0x00003000)>>12) & 0x000000ff);
-
-  
+ for(i=0;i<16 ;i++)
+  cprintf("p->freepages[%d].va=%x\n",i,(uint)p->freepages[i].va );
     cprintf("\n");
   }
     #ifdef VERBOSE_PRINT
     cprintf("\n %d / %d free pages in the system\n",  physicalPagesCounts.currentFreePagesNo,physicalPagesCounts.totalFreePages );
     #endif
 }
-
-
 

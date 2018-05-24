@@ -59,7 +59,6 @@ sys_sbrk(void)
     return -1;
   addr = myproc()->sz;
   if(n == -1){
-    checkProcAccBit();
     return -1;
   }
   if(growproc(n) < 0)
