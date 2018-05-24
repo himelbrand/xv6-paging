@@ -134,7 +134,6 @@ found:
     #endif
     #endif
 
-    p->swappedpages[i].swaploc = 0;
     p->swappedpages[i].va = (char *)0xffffffff;
   }
   p->pagesInRAM = 0;
@@ -274,9 +273,8 @@ int fork(void)
     np->swappedpages[i].va = curproc->swappedpages[i].va;
    // cprintf("swapped i=%d , va=%x\n",i,(uint)np->swappedpages[i].va);
     //cprintf("free i=%d , va=%x\n",i,(uint)np->freepages[i].va);
-   // cprintf("swaploc :%d\n",curproc->swappedpages[i].swaploc);
 
-    np->swappedpages[i].swaploc = curproc->swappedpages[i].swaploc;
+    //np->swappedpages[i].swaploc = curproc->swappedpages[i].swaploc;
   }
 
 

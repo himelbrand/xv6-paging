@@ -39,7 +39,6 @@ enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // page descriptor struct
 struct pgdesc {
-  uint swaploc;
   int age;
   char *va;
 };

@@ -107,12 +107,15 @@ mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
   last = (char *)PGROUNDDOWN(((uint)va) + size - 1);
   for (;;)
   {
-    if ((pte = walkpgdir(pgdir, a, 1)) == 0)
+    if ((pte = walkpgdir(pgdir, a, perm)) == 0)
       return -1;
     if (*pte & PTE_P)
       panic("remap");    
-    *pte = pa | perm | PTE_P;
- 
+    if (perm & PTE_PG)
+      *pte = pa | perm | PTE_PG;
+    else
+      *pte = pa | perm | PTE_P;
+
 
     if (a == last)
       break;
@@ -503,11 +506,13 @@ int deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     pte = walkpgdir(pgdir, (char *)a, 0);
     if (!pte)
       a = PGADDR(PDX(a) + 1, 0, 0) - PGSIZE;
-    else if ((*pte & PTE_P) != 0)
+    else if ((*pte & PTE_P) != 0 && (*pte & PTE_PG) == 0 )
     {
       pa = PTE_ADDR(*pte);
-      if (pa == 0)
+      if (pa == 0){
         panic("kfree");
+
+      }
       if (proc->pgdir == pgdir)
       {
         /*
@@ -576,7 +581,6 @@ int deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     founddeallocuvmPTEPG:
       proc->swappedpages[i].va = (char *)0xffffffff;
       proc->swappedpages[i].age = 0;
-      proc->swappedpages[i].swaploc = 0;
       proc->pagesInSwap--;
     }
   }
@@ -641,7 +645,6 @@ copyuvm(pde_t *pgdir, uint sz)
     if ((mem = kalloc()) == 0)
       goto bad;
     memmove(mem, (char *)P2V(pa), PGSIZE);
-     
     if (mappages(d, (void *)i, PGSIZE, V2P(mem), flags) < 0)
       goto bad;
     if(!(flags & PTE_P))

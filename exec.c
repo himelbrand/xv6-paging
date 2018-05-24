@@ -50,8 +50,8 @@ exec(char *path, char **argv)
     proc->swappedpages[i].age = 0;
     swappedpages[i].va = proc->swappedpages[i].va;
     proc->swappedpages[i].va = (char*)0xffffffff;
-    swappedpages[i].swaploc = proc->swappedpages[i].swaploc;
-    proc->swappedpages[i].swaploc = 0;
+    //swappedpages[i].swaploc = proc->swappedpages[i].swaploc;
+   // proc->swappedpages[i].swaploc = 0;
   }
   
   proc->pagesInRAM = 0;
@@ -159,7 +159,7 @@ exec(char *path, char **argv)
     proc->freepages[i].age = freepages[i].age;
     proc->swappedpages[i].age = swappedpages[i].age;
     proc->swappedpages[i].va = swappedpages[i].va;
-    proc->swappedpages[i].swaploc = swappedpages[i].swaploc;
+  //  proc->swappedpages[i].swaploc = swappedpages[i].swaploc;
   }
 #endif
   return -1;
