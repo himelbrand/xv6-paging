@@ -25,7 +25,6 @@ struct {
   struct run *freelist;
 } kmem;
 
-
 // Initialization happens in two phases.
 // 1. main() calls kinit1() while still using entrypgdir to place just
 // the pages mapped by entrypgdir on free list.
@@ -62,7 +61,6 @@ freerange(void *vstart, void *vend)
   for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
     kfree(p);
 }
-
 //PAGEBREAK: 21
 // Free the page of physical memory pointed at by v,
 // which normally should have been returned by a

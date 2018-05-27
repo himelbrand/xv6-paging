@@ -76,7 +76,6 @@ ifndef SELECTION
 SELECTION = SCFIFO 
 endif
 
-
 CC = $(TOOLPREFIX)gcc
 AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
@@ -187,6 +186,7 @@ UPROGS=\
 	_wc\
 	_zombie\
 	_myMemTest\
+	_tempTests\
 
 
 fs.img: mkfs README $(UPROGS)

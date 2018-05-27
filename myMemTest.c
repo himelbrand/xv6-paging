@@ -24,6 +24,12 @@ main(int argc, char *argv[]){
 	#ifdef AQ
 	printf(1, "myMemTest: testing AQ... \n");
 	#endif
+	#ifdef NFUA
+	printf(1, "myMemTest: testing NFUA... \n");
+	#endif
+	#ifdef LAPA
+	printf(1, "myMemTest: testing LAPA... \n");
+	#endif
 	// Allocate all remaining 13 physical pages
 	for (i = 0; i < 13; ++i) {
 		arr[i] = sbrk(PGSIZE);
@@ -69,15 +75,21 @@ main(int argc, char *argv[]){
 	and this process repeats a total of 5 times.
 	*/
 	for (i = 0; i <= 5; i++) {
-			if(i==1)arr[6][0] = 'k';
+			if(i==1)arr[6][0] = 'k';//to cause change in the policies AQ and SCFIFO results
 			arr[i][0] = 'k';
 	}
-	#ifdef SCFIFO
+	#ifdef SCFIFO//0,1,2 were inswapfile before start
 	printf(1, "6 page faults should have occurred.\n");
-	#endif
-	#ifdef AQ
+	#endif//7,8,9 were inswapfile after swaps
+	#ifdef AQ//0,1,2 were inswapfile before start
 	printf(1, "6 page faults should have occurred.\n");
-	#endif
+	#endif//6,7,8 were inswapfile before start
+	#ifdef NFUA//0,14,13 were inswapfile after swaps
+	printf(1, "1 page fault should have occurred. \n");
+	#endif//13,14,15 were inswapfile after swaps
+	#ifdef LAPA//0,1,13 were inswapfile after swaps
+	printf(1, "2 page faults should have occurred. \n");
+	#endif//13,14,15 were inswapfile after swaps
 	printContinueMSG();
 	gets(input, 10);
 
@@ -85,14 +97,20 @@ main(int argc, char *argv[]){
 		printf(1, "Child code running.\n");
 		printContinueMSG();
 		gets(input, 10);
- 
-		
 		arr[6][i] = 'k';
+		arr[15][i] = 'k';
+		arr[13][i] = 'k';
 	#ifdef SCFIFO
 	printf(1, "no page faults should have occurred.\n");
 	#endif
 	#ifdef AQ
 	printf(1, "one page fault should have occurred.\n");
+	#endif
+	#ifdef NFUA
+	printf(1, "2 page faults should have occurred.\n");
+	#endif
+	#ifdef LAPA
+	printf(1, "2 page faults should have occurred.\n");
 	#endif
 	printContinueMSG();
 	gets(input, 10);
@@ -111,20 +129,6 @@ main(int argc, char *argv[]){
 		printf(1, "Deallocated all extra pages.\nPress any key to exit the father code.\n");
 		gets(input, 10);
 	}
-
-	
-	#elif NFUA
-	
-	// int i, j;
-	// char *arr[16];
-	// char input[10];
-
-	// TODO add by Hanan
-	printf(1, "myMemTest: testing NFUA... \n");
-
-	}
-
-
 	#else
 	char* arr[50];
 	int i = 50;

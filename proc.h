@@ -39,14 +39,14 @@ enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // page descriptor struct
 struct pgdesc {
-  int age;
+  uint age;
   char *va;
 };
 
 //free page link in linkedlist of physical pages
 struct freepg {
   char *va;
-  int age;
+  uint age;
   struct freepg *next;
   struct freepg *prev;
 };

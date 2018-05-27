@@ -8,6 +8,8 @@
 #include "spinlock.h"
 #include "ppgc.h"
 
+#define SHIFT_COUNTER(x) (x >> 1);    // for shifting the counter
+#define AGE_INC 0x80000000            // adding 1 to the counter msb
 
 struct
 {
@@ -128,7 +130,7 @@ found:
     p->freepages[i].age = 0;
     p->swappedpages[i].age = 0;
     #else
-    #ifdef LAFA
+    #ifdef LAPA
     p->freepages[i].age = 0xffffffff;
     p->swappedpages[i].age =  0xffffffff;
     #endif
@@ -210,7 +212,7 @@ int growproc(int n)
 // Caller must set state of returned proc to RUNNABLE.
 int fork(void)
 {
-  int i, pid, j;
+  int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
 
@@ -273,12 +275,11 @@ int fork(void)
     np->swappedpages[i].va = curproc->swappedpages[i].va;
    // cprintf("swapped i=%d , va=%x\n",i,(uint)np->swappedpages[i].va);
     //cprintf("free i=%d , va=%x\n",i,(uint)np->freepages[i].va);
-
-    //np->swappedpages[i].swaploc = curproc->swappedpages[i].swaploc;
   }
 
 
 #if defined(SCFIFO) || defined(AQ)
+  int j;
   //relink linked list of free pages in child
   for (i = 0; i < MAX_PSYC_PAGES; i++)
     for (j = 0; j < MAX_PSYC_PAGES; ++j)
@@ -411,19 +412,17 @@ int wait(void)
   }
 }
 void aqUpdate(void){
-  //cprintf("?\n");
   struct freepg *curr,*prev,*temp,*oldpgtail;
   struct proc *proc = myproc();
   curr=proc->pghead;
-  oldpgtail = proc->pgtail; // to avoid infinite loop if everyone was accessed
- // cprintf("proc->pghead: %s\n",proc->name);
+  oldpgtail = proc->pgtail; // to avoid infinite loop 
   while(oldpgtail != curr){
     if(curr && checkAndClearFlag(curr->va,1,PTE_A) && curr != proc->pghead){
       temp = curr->prev;
       prev = temp->prev;
       prev->next=curr;
       temp->next = curr->next;
-       curr->next->prev = temp;
+      curr->next->prev = temp;
       temp->prev = curr;
       curr->next = temp;
       curr->prev = prev;
@@ -445,18 +444,15 @@ void updateAge(void){
   int i;
   pte_t *pte, *pde, *pgtab;
 
-  acquire(&ptable.lock);
-  
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if((p->state == SLEEPING || p->state == RUNNABLE || p->state == RUNNING) && (p->pid > 2)){
       for (i = 0; i < MAX_PSYC_PAGES; i++){
-        
+        // skip not allocated pages
         if (p->freepages[i].va == (char*)0xffffffff)
           continue;
-        // adding 1 to the counters
-        p->freepages[i].age++;
-        p->swappedpages[i].age++;
-        
+
+        // first shift the age counter right
+        p->freepages[i].age = SHIFT_COUNTER(p->freepages[i].age);
         pde = &p->pgdir[PDX(p->freepages[i].va)];
 
         // checking if the fist page table is present
@@ -466,18 +462,20 @@ void updateAge(void){
         }
         else 
           pte = 0;
-
         if(pte){
           // checking if the current page was access than add 1 to counter
           if( *pte & PTE_A){
-            p->freepages[i].age = 0;
+             // adding 1 to the counters
+            p->freepages[i].age = p->freepages[i].age | AGE_INC;
+            p->swappedpages[i].age = p->swappedpages[i].age | AGE_INC;
           }
         }
       }
     }
   }
-  release(&ptable.lock);
 }
+
+
 void updatePages(void){
   #ifdef AQ
     aqUpdate();
@@ -707,17 +705,17 @@ void procdump(void)
       for (i = 0; i < 10 && pc[i] != 0; i++)
         cprintf(" %p", pc[i]);
     }
-    for(i=0;i<16 && strcmp(p->name, "myMemTest") == 0 ;i++)
-    if((uint)p->swappedpages[i].va != 0xffffffff)
-      cprintf("\narr[%d] is in swap",(((uint)p->swappedpages[i].va - 0x00003000)>>12) & 0x000000ff);
-
-  
+    cprintf("\n");
+    // for(i=0;i<16 && strcmp(p->name, "myMemTest") == 0 ;i++)
+    // if((uint)p->swappedpages[i].va != 0xffffffff)
+    //   cprintf("\narr[%d] is in swap\n",(((uint)p->swappedpages[i].va - 0x00003000)>>12) & 0x000000ff);
+    // for(i=0;i<16 ;i++)
+      // cprintf("p->freepages[%d].va=%x\n",i,(uint)p->freepages[i].va );
+    
     cprintf("\n");
   }
     #ifdef VERBOSE_PRINT
     cprintf("\n %d / %d free pages in the system\n",  physicalPagesCounts.currentFreePagesNo,physicalPagesCounts.totalFreePages );
     #endif
 }
-
-
 
